@@ -40,27 +40,59 @@ t = 100 #(total length is dt*t)
 truth = np.empty((2*n,t))
 truth[:,0] = x
 
+###divergence test
+#truth_alt = truth*1
+
 #Generate the model simulation
 for i in range(t-1):
     truth[:,i+1] = channel(truth[:,i],dt,sig)
+    #truth_alt[:,i+1] = channel(truth_alt[:,i],dt,sig)
+### Anmerkung: truth enthält von 0 bis n-1 die höhe und von n bis 2n-1 die geschwindigkeit u
+
+h = truth[0:n,:]
+u = truth[n:2*n,:]
+
+
+#h_alt = truth_alt[0:n,:]
+#u_alt = truth_alt[n:2*n,:] 
+
+###Observations
+sig_h = 0.01
+h_obs = h + h*np.random.normal(0,sig_h)
+
+sig_u = 0.01
+h_obs = u + u*np.random.normal(0,sig_u)
 
 #Generate a visual simulation of the two variables
-f, (ax1, ax2) = plt.subplots(2, sharex=True,figsize=(15,15))
-ims=[]
-for time in range(0,t):
+#f, (ax1, ax2) = plt.subplots(2, sharex=True,figsize=(15,15))
+#ims=[]
+#for time in range(0,t):
     
-    ax1.set_title('Height h',fontdict=None,fontsize=24)
-    im, = ax1.plot(truth[0:n,time],'g',lw=2.5, label='truth')
-    ax1.tick_params(labelsize=18)
+    ##ax1.set_title('Height h',fontdict=None,fontsize=24)
+    ##im, = ax1.plot(truth[0:n,time],'g',lw=2.5, label='truth')
+    ##ax1.tick_params(labelsize=18)
    
-    ax2.set_title('Velocity u',fontdict=None,fontsize=24)
-    im2, = ax2.plot(truth[n:2*n,time],'g',lw=2.5)
-    ax2.tick_params(labelsize=18)
+    ##ax2.set_title('Velocity u',fontdict=None,fontsize=24)
+    ##im2, = ax2.plot(truth[n:2*n,time],'g',lw=2.5)
+    ##ax2.tick_params(labelsize=18)
     
-    f.subplots_adjust(hspace=0.15)
-    plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
+    ##f.subplots_adjust(hspace=0.15)
+    ##plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
 
-    ims.append([im,  im2, ])
+    ##ims.append([im,  im2, ])
+    
+    #ax1.set_title("Height diff between forecasts" , fontsize=24)
+    #im, = ax1.plot(h[:,time]-h_alt[:,time],"g",lw=2.5)
+    #ax1.tick_params(labelsize=18)
+    
+    #ax2.set_title("Velocity diff between forecasts" , fontsize=24)
+    #im2, = ax2.plot(u[:,time]-u_alt[:,time],"g",lw=2.5)
+    #ax1.tick_params(labelsize=18)
+    
+    #f.subplots_adjust(hspace=0.15)
+    #plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
 
-ani = anim.ArtistAnimation(f,ims)
-ani.save('LWM.mp4')
+    #ims.append([im,  im2, ])
+    
+#ani = anim.ArtistAnimation(f,ims)
+#ani.save('LWM_differences.mp4')
