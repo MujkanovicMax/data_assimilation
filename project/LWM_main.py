@@ -57,11 +57,27 @@ u = truth[n:2*n,:]
 #u_alt = truth_alt[n:2*n,:] 
 
 ###Observations
+##all gridpoints obs###
 sig_h = 0.01
-h_obs = h + h*np.random.normal(0,sig_h)
+h_err = h*np.random.normal(0,sig_h)
+h_obs = h + h_err
 
 sig_u = 0.01
-h_obs = u + u*np.random.normal(0,sig_u)
+u_err = u*np.random.normal(0,sig_u)
+u_obs = u + u_err
+
+R = np.diag(np.append(h_err,u_err))
+H = np.identity(2*n)
+
+###mth gridpoint observed###
+m = 3
+h_obs = h[::m] + h_err[::m]
+u_obs = u[::m] + u_err[::m]
+R = np.diag(np.append(h_err[::m],u_err[::m]))
+H = np.zeros((int(np.ceil(n/(m+0.0))),n))
+for i in range(H.shape[0]):
+    H[i,m*i] = 1
+H = np.hstack((H,H))
 
 #Generate a visual simulation of the two variables
 #f, (ax1, ax2) = plt.subplots(2, sharex=True,figsize=(15,15))
