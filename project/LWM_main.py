@@ -11,8 +11,45 @@ import numpy as np
 import matplotlib.animation as anim
 from matrix import MatrixC
 
-n = 40 # number of grid point
-C,alpha = MatrixC(n) 
+def make_analyis(bg,obs,B,H,R):
+    
+    x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(H.dot(bg)-obs)
+    return x
+
+def make_R_allGP(sv,sig_h,sig_u,n):
+    h = sv[0:n]
+    u = sv[n:]
+    h_err = h*np.random.normal(0,sig_h)
+    h_obs = h + h_err
+
+    u_err = u*np.random.normal(0,sig_u)
+    u_obs = u + u_err
+
+    R = np.diag(np.append(h_err,u_err))
+    return R
+
+def make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig):
+    
+    tmp_B1 = np.ones((2*n,n_fc))
+    tmp_B2 = np.ones((2*n,n_fc))
+    for i in range(n_fc):
+        for j in range(nsteps1):
+            init = channel(init,dt,sig)             
+        tmp_B1[:,i]=init   
+    for i in range(n_fc):
+        init=tmp_B1[:,i]
+        for j in range(nsteps2):
+            init = channel(init,dt,sig)
+        tmp_B2[:,i]=init 
+
+    diff = tmp_B2-tmp_B1
+    B=np.zeros((2*n,2*n))
+    for i in range (n_fc):
+        B=B+np.outer(diff[:,i],diff[:,i])
+    B = B/n_fc
+    return B
+
+
 
 def channel(x,dt,sig):
     '''
@@ -23,6 +60,8 @@ def channel(x,dt,sig):
         x = x + alpha*np.random.normal(0,sig,1) 
     return x
 
+n = 40 # number of grid point
+C,alpha = MatrixC(n) 
 
 #Define the standard deviation of the model error
 sig = 0.01
@@ -52,22 +91,22 @@ for i in range(t-1):
 h = truth[0:n,:]
 u = truth[n:2*n,:]              #######Boundary condition is u(x = last element) = 0
 
+#h = h[::-1,:]
+#u = u[::-1,:]
 
+#truth = np.vstack((h,u))
 #h_alt = truth_alt[0:n,:]
 #u_alt = truth_alt[n:2*n,:] 
 
 ###Observations
 ##all gridpoints obs###
+
+
 sig_h = 0.01
-h_err = h[:,-1]*np.random.normal(0,sig_h)
-h_obs = h[:,-1] + h_err
-
 sig_u = 0.01
-u_err = u[:,-1]*np.random.normal(0,sig_u)
-u_obs = u[:,-1] + u_err
-
-R = np.diag(np.append(h_err,u_err))
+R = make_R_allGP(truth[:,-1],sig_h,sig_u,n)
 H = np.identity(2*n)
+
 
 ###mth gridpoint observed###
 #m = 3
@@ -86,43 +125,47 @@ H = np.identity(2*n)
 
 ###B matrix
 
-init = truth[:,-1]
-n_fc = 50
+n_runs = 50
+
+truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
+init = truth_flip[:,-1]
+n_fc = 200
 nsteps1 = 10
 nsteps2 = 40
-tmp_B1 = np.ones((2*n,n_fc))
-tmp_B2 = np.ones((2*n,n_fc))
-for i in range(n_fc):
-    for j in range(nsteps1):
-        init = channel(init,dt,sig)
-    tmp_B1[:,i]=init   
-for i in range(n_fc):
-    init=tmp_B1[:,i]
-    for j in range(nsteps2):
-        init = channel(init,dt,sig)
-    tmp_B2[:,i]=init 
-
-diff = tmp_B2-tmp_B1
-B=np.zeros((2*n,2*n))
-for i in range (n_fc):
-    B=B+np.outer(diff[:,i],diff[:,i])
-B = B/n_fc
-
-
 n_assim = 5
 
-obs_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+an = np.zeros((2*n,n_runs))
 
-bg_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-bg = np.mean(truth[:,-n_assim:] + bg_error,axis=1)
+B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
 
-def J(x):
-    J = np.dot(np.dot((x-bg),np.linalg.inv(B)),(x-bg)) + np.dot(np.dot((obs-np.dot(H,x)),np.linalg.inv(R)),(obs-np.dot(H,x)))
-    return J
 
-a = J(truth[:,-1])    
+obs_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
+obs = np.mean(truth_flip[:,-n_assim:] + obs_error,axis=1)
 
+bg_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
+bg = np.mean(truth_flip[:,-n_assim:] + bg_error,axis=1)
+
+an[:,0] = make_analyis(bg,obs,B,H,R)
+
+for i in range(n_runs-1):
+    
+    truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
+    
+    truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
+    init = truth_flip[:,-1]
+    
+    B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
+    R = make_R_allGP(init,sig_h,sig_u,n)
+    obs_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
+    obs = np.mean(truth_flip[:,-n_assim:] + obs_error,axis=1)
+    bg = an[:,i]
+    an[:,i+1] = make_analyis(bg,obs,B,H,R)
+    
+    
+
+#fig = plt.figure()
+#plt.imshow(B*1000,cmap="gray")
+#plt.show()
 
 #Generate a visual simulation of the two variables
 #f, (ax1, ax2) = plt.subplots(2, sharex=True,figsize=(15,15))
