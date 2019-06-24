@@ -12,20 +12,20 @@ import matplotlib.animation as anim
 from matrix import MatrixC
 
 def make_analyis(bg,obs,B,H,R):
+  
     
     x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(H.dot(bg)-obs)
+    
     return x
 
 def make_R_allGP(sv,sig_h,sig_u,n):
     h = sv[0:n]
     u = sv[n:]
-    h_err = h*np.random.normal(0,sig_h)
-    h_obs = h + h_err
-
-    u_err = u*np.random.normal(0,sig_u)
-    u_obs = u + u_err
-
-    R = np.diag(np.append(h_err,u_err))
+    #h_err = h*np.random.normal(0,sig_h)
+    #u_err = u*np.random.normal(0,sig_u)
+    #R = np.diag(np.append(h_err,u_err))
+    R=0.001*np.identity(2*n)
+    
     return R
 
 def make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig):
@@ -104,8 +104,9 @@ u = truth[n:2*n,:]              #######Boundary condition is u(x = last element)
 
 sig_h = 0.01
 sig_u = 0.01
-R = make_R_allGP(truth[:,-1],sig_h,sig_u,n)
 H = np.identity(2*n)
+H = H[0:-1,:]
+
 
 
 ###mth gridpoint observed###
@@ -127,23 +128,26 @@ H = np.identity(2*n)
 
 n_runs = 50
 
-truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
-init = truth_flip[:,-1]
+#truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
+init = truth[:,-1]
 n_fc = 200
 nsteps1 = 10
 nsteps2 = 40
-n_assim = 5
+n_assim = 1
 
 an = np.zeros((2*n,n_runs))
 
 B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
+R = make_R_allGP(init,sig_h,sig_u,n)
+R= H.dot(R.dot(H.T)) 
 
 
-obs_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
-obs = np.mean(truth_flip[:,-n_assim:] + obs_error,axis=1)
+obs_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+obs=H.dot(obs)
 
-bg_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
-bg = np.mean(truth_flip[:,-n_assim:] + bg_error,axis=1)
+bg_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+bg = np.mean(truth[:,-n_assim:] + bg_error,axis=1)
 
 an[:,0] = make_analyis(bg,obs,B,H,R)
 
@@ -151,17 +155,19 @@ for i in range(n_runs-1):
     
     truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
     
-    truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
-    init = truth_flip[:,-1]
+    #truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
+    init = truth[:,-1]
     
-    B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
-    R = make_R_allGP(init,sig_h,sig_u,n)
-    obs_error = truth_flip[:,-n_assim:]* np.random.normal(0,sig_h,size=truth_flip[:,-n_assim:].shape)
-    obs = np.mean(truth_flip[:,-n_assim:] + obs_error,axis=1)
+    #B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
+    obs_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+    obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+    obs=H.dot(obs)
     bg = an[:,i]
-    an[:,i+1] = make_analyis(bg,obs,B,H,R)
+    an[:,i+1] = make_analyis(bg,obs,B,H,R)  
     
-    
+
+diff = an - truth[:,-n_runs:]
+print(np.mean(diff))
 
 #fig = plt.figure()
 #plt.imshow(B*1000,cmap="gray")
