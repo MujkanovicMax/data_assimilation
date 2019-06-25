@@ -14,22 +14,17 @@ from matrix import MatrixC
 def make_analyis(bg,obs,B,H,R):
   
     
-    x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(H.dot(bg)-obs)
+    x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(obs-H.dot(bg))
     
     return x
 
-def make_R_allGP(sv,sig_h,sig_u,n):
-    h = sv[0:n]
-    u = sv[n:]
-    #h_err = h*np.random.normal(0,sig_h)
-    #u_err = u*np.random.normal(0,sig_u)
-    #R = np.diag(np.append(h_err,u_err))
-    R=0.001*np.identity(2*n)
-    
+def make_R_allGP(sig_h,sig_u,n):
+    h_err = sig_h*np.ones(n)
+    u_err = sig_u*np.ones(n)
+    R=np.diag(np.append(h_err, u_err))
     return R
 
 def make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig):
-    
     tmp_B1 = np.ones((2*n,n_fc))
     tmp_B2 = np.ones((2*n,n_fc))
     for i in range(n_fc):
@@ -49,7 +44,76 @@ def make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig):
     B = B/n_fc
     return B
 
+def threeDvar(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50,n_assim=1,n_fc=200,nsteps1=10,nsteps2=40):
 
+    init = truth[:,-1]
+
+    an = np.zeros((2*n,n_runs))
+    bg = np.zeros((2*n,n_runs))
+
+    B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
+    R = make_R_allGP(sig_h,sig_u,n)
+    R= H.dot(R.dot(H.T)) 
+
+    obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+    obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+    obs=H.dot(obs)
+
+    bg_error = np.random.normal(0,sig_h,size=bg[:,0].shape)
+    bg[:,0] = truth[:,-1] + bg_error
+
+    an[:,0] = make_analyis(bg[:,0],obs,B,H,R)
+
+    for i in range(n_runs-1):
+        
+        truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
+        bg[:,i+1]= channel(an[:,i],1,sig)
+        #init = truth[:,-1]
+        #B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
+        obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+        obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+        obs=H.dot(obs)
+        an[:,i+1] = make_analyis(bg[:,i+1],obs,B,H,R) 
+        
+    return an, bg, truth
+
+def ETKF(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50, N=50,n_assim=1):
+    
+    an = np.zeros((2*n,n_runs,N))
+    bg = np.zeros((2*n,n_runs,N))
+    B = np.zeros((2*n,2*n,n_runs))
+    Pa = B*1
+    K = np.zeros((2*n,2*n-1,n_runs))
+    R = make_R_allGP(sig_h,sig_u,n)
+    R= H.dot(R.dot(H.T)) 
+    
+    obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+    obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+    obs=H.dot(obs)
+    for i in range (N):
+        bg_error = np.random.normal(0,sig_h,size=truth[:,-1].shape)
+        bg[:,0,i] = truth[:,-1] + bg_error
+    
+    indices = np.arange(0,N,1)
+    B[:,:,0] = 1./(N-1) * np.sum(np.outer(bg[:,0,i]-np.mean(bg[:,0,:],axis=1), bg[:,0,i]-np.mean(bg[:,0,:],axis=1))  for i in indices) 
+    Pa[:,:,0] = B[:,:,0] - B[:,:,0].dot(H.T).dot(np.linalg.inv(H.dot(B[:,:,0]).dot(H.T)+R)).dot(H).dot(B[:,:,0])  
+    K[:,:,0] = B[:,:,0].dot(H.T).dot(np.linalg.inv(R))
+    for i in range (N):
+        an[:,0,i] = bg[:,0,i] + K[:,:,0].dot(obs-H.dot(bg[:,0,i]))
+    for i in range(n_runs-1):
+        truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
+        for l in range (N):
+            bg[:,i+1,l]= channel(an[:,i,l],1,sig)
+        obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
+        obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
+        obs=H.dot(obs)
+        B[:,:,i+1] = 1./(N-1) * np.sum(np.outer(bg[:,i+1,j]-np.mean(bg[:,i+1,:],axis=1), bg[:,i+1,j]-np.mean(bg[:,i+1,:],axis=1))  for j in indices) 
+        Pa[:,:,i+1] = B[:,:,i+1] - B[:,:,i+1].dot(H.T).dot(np.linalg.inv(H.dot(B[:,:,i+1]).dot(H.T)+R)).dot(H).dot(B[:,:,i+1])  
+        K[:,:,i+1] = B[:,:,i+1].dot(H.T).dot(np.linalg.inv(R))
+        for k in range (N):
+            an[:,i+1,k] = bg[:,i+1,k] + K[:,:,i+1].dot(obs-H.dot(bg[:,i+1,k]))
+        
+    return an,bg,truth
 
 def channel(x,dt,sig):
     '''
@@ -102,8 +166,8 @@ u = truth[n:2*n,:]              #######Boundary condition is u(x = last element)
 ##all gridpoints obs###
 
 
-sig_h = 0.01
-sig_u = 0.01
+sig_h = np.mean(np.abs(u))*0.01
+sig_u = np.mean(np.abs(h))*0.01
 H = np.identity(2*n)
 H = H[0:-1,:]
 
@@ -124,50 +188,15 @@ H = H[0:-1,:]
 #R = np.diag(u_err)
 #H=np.identity(n)
 
-###B matrix
 
-n_runs = 50
+            
+an_3Dvar, bg_3Dvar, truth_3Dvar = threeDvar (truth,dt,sig,sig_h,sig_u,H,n)
+an_ETKF, bg_ETKF, truth_ETKF = ETKF(truth,dt,sig,sig_h,sig_u,H,n)
 
-#truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
-init = truth[:,-1]
-n_fc = 200
-nsteps1 = 10
-nsteps2 = 40
-n_assim = 1
-
-an = np.zeros((2*n,n_runs))
-
-B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
-R = make_R_allGP(init,sig_h,sig_u,n)
-R= H.dot(R.dot(H.T)) 
+#diff = an - truth[:,-an.shape[1]:]
+#print(np.mean(diff))
 
 
-obs_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
-obs=H.dot(obs)
-
-bg_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-bg = np.mean(truth[:,-n_assim:] + bg_error,axis=1)
-
-an[:,0] = make_analyis(bg,obs,B,H,R)
-
-for i in range(n_runs-1):
-    
-    truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
-    
-    #truth_flip = np.vstack((truth[0:n,:][::-1,:],truth[n:,:][::-1,:]))
-    init = truth[:,-1]
-    
-    #B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
-    obs_error = truth[:,-n_assim:]* np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-    obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
-    obs=H.dot(obs)
-    bg = an[:,i]
-    an[:,i+1] = make_analyis(bg,obs,B,H,R)  
-    
-
-diff = an - truth[:,-n_runs:]
-print(np.mean(diff))
 
 #fig = plt.figure()
 #plt.imshow(B*1000,cmap="gray")
