@@ -13,10 +13,10 @@ from matrix import MatrixC
 
 def make_analyis(bg,obs,B,H,R):
   
+    v = obs-H.dot(bg)
+    x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(v)
     
-    x = bg + B.dot(H.transpose()).dot(np.linalg.inv(H.dot(B).dot(H.transpose())+R)).dot(obs-H.dot(bg))
-    
-    return x
+    return x, -v
 
 def make_R_allGP(sig_h,sig_u,n):
     h_err = sig_h*np.ones(n)
@@ -50,7 +50,8 @@ def threeDvar(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50,n_assim=1,n_fc=200,nsteps1=
 
     an = np.zeros((2*n,n_runs))
     bg = np.zeros((2*n,n_runs))
-
+    v  = np.zeros(((H.dot(bg[:,0])).shape[0],n_runs))
+    
     B = make_Bmat(init, n_fc, nsteps1,nsteps2,n,dt,sig)
     R = make_R_allGP(sig_h,sig_u,n)
     R= H.dot(R.dot(H.T)) 
@@ -62,7 +63,7 @@ def threeDvar(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50,n_assim=1,n_fc=200,nsteps1=
     bg_error = np.random.normal(0,sig_h,size=bg[:,0].shape)
     bg[:,0] = truth[:,-1] + bg_error
 
-    an[:,0] = make_analyis(bg[:,0],obs,B,H,R)
+    an[:,0],v[:,0] = make_analyis(bg[:,0],obs,B,H,R)
 
     for i in range(n_runs-1):
         
@@ -73,9 +74,9 @@ def threeDvar(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50,n_assim=1,n_fc=200,nsteps1=
         obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
         obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
         obs=H.dot(obs)
-        an[:,i+1] = make_analyis(bg[:,i+1],obs,B,H,R) 
+        an[:,i+1],v[:,i+1] = make_analyis(bg[:,i+1],obs,B,H,R) 
         
-    return an, bg, truth[:,-n_runs:]
+    return an, bg, truth[:,-n_runs:], v
 
 def ETKF(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50, N=50,n_assim=1):
     
@@ -142,7 +143,7 @@ def channel(x,dt,sig):
         x = np.dot(C,x)
         x = x + alpha*np.random.normal(0,sig,1) 
     return x
-
+############################################################parameters
 n = 40 # number of grid point
 C,alpha = MatrixC(n) 
 
@@ -161,36 +162,46 @@ t = 100 #(total length is dt*t)
 #Allocate an array to store the model simulation
 truth = np.empty((2*n,t))
 truth[:,0] = x
-
-###divergence test
-#truth_alt = truth*1
+############################################################
 
 #Generate the model simulation
 for i in range(t-1):
     truth[:,i+1] = channel(truth[:,i],dt,sig)
-    #truth_alt[:,i+1] = channel(truth_alt[:,i],dt,sig)
-### Anmerkung: truth enthält von 0 bis n-1 die höhe und von n bis 2n-1 die geschwindigkeit u
+   
+#climatology
+n_ens=100
+clim_ens = np.zeros((2*n, 200, n_ens))
+clim = np.zeros((2*n, 200))
+for j in range (n_ens):
+    for i in range(199):
+        clim_ens[:,i+1, j] = channel(clim_ens[:,i,j],dt,sig)
+        
+clim=np.mean(clim_ens, axis=2)
+clim_diff = np.zeros((2*n,200,n_ens))
+for i in range(n_ens):    
+    clim_diff[:,:,i] = (clim_ens[:,:,i]-clim)**2
+clim_diff = np.mean(clim_diff,axis = 2)
+
+
+clim_cov=np.zeros((2*n, 2*n, 200, n_ens))
+for i in range(200):
+    for j in range(n_ens):
+        clim_cov[:,:,i,j]= np.outer(clim_ens[:,i,j],clim_ens[:,i,j])
+clim_covmat = np.mean(clim_cov, axis=3)  
+
+
+
 
 h = truth[0:n,:]
 u = truth[n:2*n,:]              #######Boundary condition is u(x = last element) = 0
 
-#h = h[::-1,:]
-#u = u[::-1,:]
-
-#truth = np.vstack((h,u))
-#h_alt = truth_alt[0:n,:]
-#u_alt = truth_alt[n:2*n,:] 
 
 ###Observations
 ##all gridpoints obs###
-
-
 sig_h = np.mean(np.abs(u))*0.01
 sig_u = np.mean(np.abs(h))*0.01
 H = np.identity(2*n)
 H = H[0:-1,:]
-
-
 
 ###mth gridpoint observed###
 #m = 3
@@ -207,24 +218,38 @@ H = H[0:-1,:]
 #R = np.diag(u_err)
 #H=np.identity(n)
 
-an_3Dvar_stat=np.zeros((2*n,50,50))
-bg_3Dvar_stat=np.zeros((2*n,50,50))
-truth_stat=np.zeros((2*n,50,50))
-for i in range (50):            
-    an_3Dvar, bg_3Dvar, truth_3Dvar = threeDvar (truth,dt,sig,sig_h,sig_u,H,n)
-    an_3Dvar_stat[:,:,i]=an_3Dvar
-    bg_3Dvar_stat[:,:,i]=bg_3Dvar
-    truth_stat[:,:,i]=truth_3Dvar
+################################################## 3DVar
+#an_3Dvar_stat=np.zeros((2*n,50,50))
+#bg_3Dvar_stat=np.zeros((2*n,50,50))
+#truth_stat=np.zeros((2*n,50,50))
+#v_stat=np.zeros((2*n-1,50,50))
+#for i in range (50):            
+    #an_3Dvar, bg_3Dvar, truth_3Dvar,v_3Dvar = threeDvar (truth,dt,sig,sig_h,sig_u,H,n)
+    #an_3Dvar_stat[:,:,i]=an_3Dvar
+    #bg_3Dvar_stat[:,:,i]=bg_3Dvar
+    #truth_stat[:,:,i]=truth_3Dvar
+    #v_stat[:,:,i]=v_3Dvar
     
 
-#an_ETKF, bg_ETKF, truth_ETKF = ETKF(truth,dt,sig,sig_h,sig_u,H,n)
+##an_ETKF, bg_ETKF, truth_ETKF = ETKF(truth,dt,sig,sig_h,sig_u,H,n)
 
+##calculate innovation covariance matrix over time from mean over all ensembles
+#v_mean = np.mean(v_stat,axis=2)
+#v_cov=np.zeros((2*n-1, 2*n-1, 50, 50))
+#for i in range(50):
+    #for j in range(50):
+        #v_cov[:,:,i,j]= np.outer(v_stat[:,i,j],v_stat[:,i,j])
+#v_covmat = np.mean(v_cov, axis=3)  
 
-d_an=np.sqrt(np.mean((an_3Dvar_stat-truth_stat)**2,axis=2))
-print(d_an)
+## root mean square error of analysis and background over time and space
 
-d_bg=np.sqrt(np.mean((bg_3Dvar_stat-truth_stat)**2,axis=2))
-print(d_bg)
+#d_an=np.sqrt(np.mean((an_3Dvar_stat-truth_stat)**2,axis=2))
+#print(d_an)
+
+#d_bg=np.sqrt(np.mean((bg_3Dvar_stat-truth_stat)**2,axis=2))
+#print(d_bg)
+
+#######################################################
 
 
 #diffbg = bg_3Dvar - truth[:,-bg_3Dvar.shape[1]:]
@@ -235,10 +260,17 @@ print(d_bg)
 
 
 
-fig,ax = plt.subplots()
-plot=ax.contourf(np.arange(0,50,1), np.arange(0,2*n,1), d_an, np.arange(np.min(d_an),np.quantile(d_an,0.95),1e-5))
-fig.colorbar(plot, ax=ax)
-plt.show()
+#fig,ax = plt.subplots()
+#plot=ax.contourf(np.arange(0,50,1), np.arange(0,2*n,1), d_an, np.arange(np.min(d_an),np.quantile(d_an,0.95),1e-5))
+#fig.colorbar(plot, ax=ax)
+#plt.show()
+
+#fig,ax = plt.subplots()
+#plot=ax.contourf(np.arange(0,200,1), np.arange(0,2*n,1), clim, np.arange(np.quantile(clim,0.01),np.quantile(clim,0.95),1e-5))
+#fig.colorbar(plot, ax=ax)
+#plt.show()
+
+
 
 #fig = plt.figure()
 #plt.imshow(B*1000,cmap="gray")
