@@ -19,8 +19,8 @@ def make_analyis(bg,obs,B,H,R):
     return x, -v
 
 def make_R_allGP(sig_h,sig_u,n):
-    h_err = sig_h*np.ones(n)
-    u_err = sig_u*np.ones(n)
+    h_err = sig_h**2*np.ones(n)
+    u_err = sig_u**2*np.ones(n)
     R=np.diag(np.append(h_err, u_err))
     return R
 
@@ -82,6 +82,7 @@ def ETKF(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50, N=50,n_assim=1):
     
     an = np.zeros((2*n,n_runs,N))
     bg = np.zeros((2*n,n_runs,N))
+    v  = np.zeros(((H.dot(bg[:,0])).shape[0],n_runs,N))
     B = np.zeros((2*n,2*n,n_runs))
     Pa = B*1
     K = np.zeros((2*n,2*n-1,n_runs))
@@ -94,46 +95,31 @@ def ETKF(truth,dt,sig,sig_h,sig_u,H,n,n_runs=50, N=50,n_assim=1):
     for i in range (N):
         bg_error = np.random.normal(0,sig_h,size=truth[:,-1].shape)
         bg[:,0,i] = truth[:,-1] + bg_error
-    print(bg_error)
     
     indices = np.arange(0,N,1)
-    print("1")
     B[:,:,0] = 1./(N-1) * np.sum(np.outer(bg[:,0,i]-np.mean(bg[:,0,:],axis=1), bg[:,0,i]-np.mean(bg[:,0,:],axis=1))  for i in indices) 
-    print("2")
 
     Pa[:,:,0] = B[:,:,0] - B[:,:,0].dot(H.T).dot(np.linalg.inv(H.dot(B[:,:,0]).dot(H.T)+R)).dot(H).dot(B[:,:,0])  
-    print("3")
-    K[:,:,0] = B[:,:,0].dot(H.T).dot(np.linalg.inv(R))
-    print("4")
+    K[:,:,0] = Pa[:,:,0].dot(H.T).dot(np.linalg.inv(R))
     for i in range (N):
-        an[:,0,i] = bg[:,0,i] + K[:,:,0].dot(obs-H.dot(bg[:,0,i]))
-    for i in range(5):#n_runs-1
+        v[:,0,i]=obs-H.dot(bg[:,0,i])
+        an[:,0,i] = bg[:,0,i] + K[:,:,0].dot(v[:,0,i])
+    for i in range(n_runs-1):
         truth = np.hstack((truth,np.reshape(channel(truth[:,-1],1,sig),(2*n,1))))
-        print("a")
         for l in range (N):
             bg[:,i+1,l]= channel(an[:,i,l],1,sig)
-        print("b")
         obs_error = np.random.normal(0,sig_h,size=truth[:,-n_assim:].shape)
-        print("c")
         obs = np.mean(truth[:,-n_assim:] + obs_error,axis=1)
-        print("d")
         obs=H.dot(obs)
-        print("e")
         
         B[:,:,i+1] = 1./(N-1) * np.sum(np.outer(bg[:,i+1,j]-np.mean(bg[:,i+1,:],axis=1), bg[:,i+1,j]-np.mean(bg[:,i+1,:],axis=1))  for j in indices) 
-        #print(B)
         Pa[:,:,i+1] = B[:,:,i+1] - B[:,:,i+1].dot(H.T).dot(np.linalg.inv(H.dot(B[:,:,i+1]).dot(H.T)+R)).dot(H).dot(B[:,:,i+1])  
-        print("g")
-        K[:,:,i+1] = B[:,:,i+1].dot(H.T).dot(np.linalg.inv(R))
+        K[:,:,i+1] = Pa[:,:,i+1].dot(H.T).dot(np.linalg.inv(R))
         for k in range (N):
-            an[:,i+1,k] = bg[:,i+1,k] + K[:,:,i+1].dot(obs-H.dot(bg[:,i+1,k]))
-        print("h")
-        print("an ")
-        print(an[:,i+1,25])
-        print("bg")
-        print(bg[:,i+1,25])
-    print("6")    
-    return an,bg,truth
+            v[:,i+1,k]=obs-H.dot(bg[:,i+1,k])
+            an[:,i+1,k] = bg[:,i+1,k] + K[:,:,i+1].dot(v[:,i+1,k])
+        
+    return an,bg,truth[:,-n_runs:], -v
 
 def channel(x,dt,sig):
     '''
@@ -198,8 +184,8 @@ u = truth[n:2*n,:]              #######Boundary condition is u(x = last element)
 
 ###Observations
 ##all gridpoints obs###
-sig_h = np.mean(np.abs(u))*0.01
-sig_u = np.mean(np.abs(h))*0.01
+sig_h =0.001
+sig_u = 0.001
 H = np.identity(2*n)
 H = H[0:-1,:]
 
@@ -219,51 +205,78 @@ H = H[0:-1,:]
 #H=np.identity(n)
 
 ################################################## 3DVar
-#an_3Dvar_stat=np.zeros((2*n,50,50))
-#bg_3Dvar_stat=np.zeros((2*n,50,50))
-#truth_stat=np.zeros((2*n,50,50))
-#v_stat=np.zeros((2*n-1,50,50))
-#for i in range (50):            
-    #an_3Dvar, bg_3Dvar, truth_3Dvar,v_3Dvar = threeDvar (truth,dt,sig,sig_h,sig_u,H,n)
-    #an_3Dvar_stat[:,:,i]=an_3Dvar
-    #bg_3Dvar_stat[:,:,i]=bg_3Dvar
-    #truth_stat[:,:,i]=truth_3Dvar
-    #v_stat[:,:,i]=v_3Dvar
+an_3Dvar_stat=np.zeros((2*n,50,50))
+bg_3Dvar_stat=np.zeros((2*n,50,50))
+truth_stat=np.zeros((2*n,50,50))
+v_stat=np.zeros((2*n-1,50,50))
+for i in range (50):            
+    an_3Dvar, bg_3Dvar, truth_3Dvar,v_3Dvar = threeDvar (truth,dt,sig,sig_h,sig_u,H,n)
+    an_3Dvar_stat[:,:,i]=an_3Dvar
+    bg_3Dvar_stat[:,:,i]=bg_3Dvar
+    truth_stat[:,:,i]=truth_3Dvar
+    v_stat[:,:,i]=v_3Dvar
     
+#an_ETKF_stat=np.zeros((2*n,50,50,50))
+#bg_ETKF_stat=np.zeros((2*n,50,50,50))
+#truth_stat=np.zeros((2*n,50,50))
+#v_stat=np.zeros((2*n-1,50,50,50))
+#an_ETKF, bg_ETKF, truth_ETKF, v_ETKF = ETKF(truth,dt,sig,sig_h,sig_u,H,n)
 
-##an_ETKF, bg_ETKF, truth_ETKF = ETKF(truth,dt,sig,sig_h,sig_u,H,n)
+#for i in range (50):            
+    #an_ETKF, bg_ETKF, truth_ETKF,v_ETKF = ETKF (truth,dt,sig,sig_h,sig_u,H,n)
+    #an_ETKF_stat[:,:,:,i]=an_ETKF
+    #bg_ETKF_stat[:,:,:,i]=bg_ETKF
+    #truth_stat[:,:,i]=truth_ETKF
+    #v_stat[:,:,:,i]=v_ETKF
 
 ##calculate innovation covariance matrix over time from mean over all ensembles
 #v_mean = np.mean(v_stat,axis=2)
-#v_cov=np.zeros((2*n-1, 2*n-1, 50, 50))
+#v_cov=np.zeros((2*n-1, 2*n-1, 50, 50, 50))
 #for i in range(50):
-    #for j in range(50):
-        #v_cov[:,:,i,j]= np.outer(v_stat[:,i,j],v_stat[:,i,j])
-#v_covmat = np.mean(v_cov, axis=3)  
+    #for k in range (50):
+        #for j in range(50):
+            #v_cov[:,:,i,k,j]= np.outer(v_stat[:,i,k,j],v_stat[:,i,k,j])
+#v_covmat = np.mean(np.mean(v_cov, axis=4),axis=3) 
 
-## root mean square error of analysis and background over time and space
+# root mean square error of analysis and background over time and space
 
-#d_an=np.sqrt(np.mean((an_3Dvar_stat-truth_stat)**2,axis=2))
+d_an=np.sqrt(np.mean((an_3Dvar_stat-truth_stat)**2,axis=2))
+print(d_an)
+
+d_bg=np.sqrt(np.mean((bg_3Dvar_stat-truth_stat)**2,axis=2))
+print(d_bg)
+
+#d_an=np.sqrt(np.mean((np.mean(an_ETKF_stat, axis=2)-truth_stat)**2,axis=2))
 #print(d_an)
 
-#d_bg=np.sqrt(np.mean((bg_3Dvar_stat-truth_stat)**2,axis=2))
+#d_bg=np.sqrt(np.mean((np.mean(bg_ETKF_stat,axis=2)-truth_stat)**2,axis=2))
 #print(d_bg)
 
-#######################################################
 
 
-#diffbg = bg_3Dvar - truth[:,-bg_3Dvar.shape[1]:]
+
+diffbg = np.mean(bg_3Dvar_stat, axis=2) - truth[:,-bg_3Dvar.shape[1]:]
+print(np.mean(diffbg))
+
+diffan = np.mean(an_3Dvar_stat, axis=2) - truth[:,-an_3Dvar.shape[1]:]
+print(np.mean(diffan))
+
+#diffbg = np.mean(np.mean(bg_ETKF_stat, axis=2),axis=2) - truth[:,-bg_ETKF.shape[1]:]
 #print(np.mean(diffbg))
 
-#diffan = an_3Dvar - truth[:,-an_3Dvar.shape[1]:]
+#diffan = np.mean(np.mean(an_ETKF_stat, axis=2), axis=2) - truth[:,-an_ETKF.shape[1]:]
 #print(np.mean(diffan))
 
-
+######################################################
 
 #fig,ax = plt.subplots()
-#plot=ax.contourf(np.arange(0,50,1), np.arange(0,2*n,1), d_an, np.arange(np.min(d_an),np.quantile(d_an,0.95),1e-5))
+#plot=ax.contourf(np.arange(0,50,1), np.arange(0,2*n,1), d_an, np.arange(np.quantile(d_an,0.4),np.quantile(d_an,0.95),1e-5))
 #fig.colorbar(plot, ax=ax)
 #plt.show()
+
+fig,ax = plt.subplots()
+plt.plot(np.mean(d_an,axis=0))
+plt.show()
 
 #fig,ax = plt.subplots()
 #plot=ax.contourf(np.arange(0,200,1), np.arange(0,2*n,1), clim, np.arange(np.quantile(clim,0.01),np.quantile(clim,0.95),1e-5))
